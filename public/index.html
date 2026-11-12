@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact Page Automation</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1b2430; --muted: #5d6877; --line: #dfe3e8;
+    --accent: #0b5cad; --ok: #14733a; --okbg: #e3f4e9; --bad: #a42a2a; --badbg: #fbe7e7; --warn: #8a5a00; --warnbg: #fff1d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14181d; --panel: #1c2229; --ink: #e8ecf1; --muted: #9aa6b4; --line: #2c343d;
+      --accent: #5aa4ee; --ok: #6fd392; --okbg: #17301f; --bad: #f08a8a; --badbg: #3a1d1d; --warn: #f0c36a; --warnbg: #3a2e14; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 20px; color: var(--muted); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .state { margin-left: auto; color: var(--muted); }
+  .counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+  .counts div { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .counts b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+  .counts span { color: var(--muted); font-size: 13px; }
+  .err { color: var(--bad); margin-top: 10px; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); }
+  td.url { word-break: break-all; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; }
+  .Success { background: var(--okbg); color: var(--ok); }
+  .Failed { background: var(--badbg); color: var(--bad); }
+  .Review { background: var(--warnbg); color: var(--warn); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Contact Page Automation</h1>
+  <p class="sub">Reads websites from your Google Sheet, opens 10 at a time, submits each contact form and records Success or Failed.</p>
+
+  <section class="panel">
+    <div class="bar">
+      <button id="runAll" class="primary">Run until all done</button>
+      <button id="runOne">Run one batch</button>
+      <button id="stop">Stop after this batch</button>
+      <span class="state" id="state">Loading…</span>
+    </div>
+    <div class="err" id="error" hidden></div>
+  </section>
+
+  <section class="panel">
+    <div class="counts">
+      <div><b id="cBatches">0</b><span>Batches</span></div>
+      <div><b id="cProcessed">0</b><span>Processed</span></div>
+      <div><b id="cSuccess">0</b><span>Success</span></div>
+      <div><b id="cFailed">0</b><span>Failed</span></div>
+      <div><b id="cReview">0</b><span>Review required</span></div>
+    </div>
+  </section>
+
+  <section class="panel scroll">
+    <table>
+      <thead><tr><th>Row</th><th>Website</th><th>Status</th><th>Reason</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="4">No results yet.</td></tr></tbody>
+    </table>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  async function call(method, url) {
+    const res = await fetch(url, { method });
+    let body = {};
+    try { body = await res.json(); } catch (_) {}
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    return body;
+  }
+
+  function chipClass(status) { return status === 'Review required' ? 'Review' : status; }
+
+  function render(s) {
+    $('state').textContent = s.running ? (s.stopRequested ? 'Stopping after this batch…' : 'Running…') : (s.finishedAt ? 'Finished' : 'Idle');
+    $('runAll').disabled = s.running;
+    $('runOne').disabled = s.running;
+    $('stop').disabled = !s.running;
+    $('cBatches').textContent = s.batches;
+    $('cProcessed').textContent = s.totals.processed;
+    $('cSuccess').textContent = s.totals.success;
+    $('cFailed').textContent = s.totals.failed;
+    $('cReview').textContent = s.totals.review;
+    $('error').hidden = !s.error;
+    $('error').textContent = s.error ? 'Run stopped: ' + s.error : '';
+
+    const tbody = $('rows');
+    tbody.replaceChildren();
+    if (!s.recent.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4; td.textContent = 'No results yet.';
+      tr.appendChild(td); tbody.appendChild(tr);
+      return;
+    }
+    for (const r of s.recent) {
+      const tr = document.createElement('tr');
+      const cells = [r.rowNumber, r.url, null, r.reason];
+      cells.forEach((value, i) => {
+        const td = document.createElement('td');
+        if (i === 1) td.className = 'url';
+        if (i === 2) {
+          const chip = document.createElement('span');
+          chip.className = 'chip ' + chipClass(r.status);
+          chip.textContent = r.status;
+          td.appendChild(chip);
+        } else {
+          td.textContent = value;   // textContent: sheet data is never interpreted as HTML
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    }
+  }
+
+  async function refresh() {
+    try { render(await call('GET', '/api/status')); } catch (e) { $('state').textContent = 'Server not reachable'; }
+  }
+
+  $('runAll').onclick = async () => { try { await call('POST', '/api/runs'); } catch (e) { alert(e.message); } refresh(); };
+  $('runOne').onclick = async () => { $('runOne').disabled = true; try { await call('POST', '/api/batches'); } catch (e) { alert(e.message); } refresh(); };
+  $('stop').onclick = async () => { try { await call('POST', '/api/runs/stop'); } catch (e) { alert(e.message); } refresh(); };
+
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "contact-page-automation",
+  "version": "1.0.0",
+  "description": "Reads websites from Google Sheets, finds each Contact Us / Get a Quote page, fills and submits the form, and writes Success/Failed back to the sheet.",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
+    "browsers": "npx playwright install chromium"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "googleapis": "^144.0.0",
+    "playwright": "^1.49.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": ">=0.30.0"
+  }
+}
